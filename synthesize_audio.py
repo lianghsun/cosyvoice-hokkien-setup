@@ -129,7 +129,10 @@ def load_hf_seed_speakers(repo_id: str, cache_dir: str, hf_token: str) -> list:
         return seeds
 
     logger.info("Downloading HF seed speakers from %s …", repo_id)
+    import datasets as hf_datasets
     ds = load_dataset(repo_id, split="train", token=hf_token or None)
+    # decode=False: get raw bytes instead of decoded array (avoids torchcodec requirement)
+    ds = ds.cast_column("audio", hf_datasets.Audio(decode=False))
 
     for idx, item in enumerate(ds):
         audio_info  = item.get("audio", {})
@@ -141,13 +144,11 @@ def load_hf_seed_speakers(repo_id: str, cache_dir: str, hf_token: str) -> list:
         wav_path    = os.path.join(cache_dir, f"{utt_id}.wav")
 
         if not os.path.exists(wav_path):
-            if isinstance(audio_info, dict) and "array" in audio_info:
-                arr = np.array(audio_info["array"], dtype=np.float32)
-                sr  = int(audio_info.get("sampling_rate", 16000))
+            raw_bytes = audio_info.get("bytes") if isinstance(audio_info, dict) else None
+            if raw_bytes:
+                # decode with soundfile via BytesIO
+                arr, sr = sf.read(io.BytesIO(raw_bytes), dtype="float32")
                 sf.write(wav_path, arr, sr)
-            elif isinstance(audio_info, dict) and "bytes" in audio_info and audio_info["bytes"]:
-                with open(wav_path, "wb") as f:
-                    f.write(audio_info["bytes"])
             else:
                 continue  # 無法取得音頻，跳過
 
