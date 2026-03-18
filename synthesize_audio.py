@@ -11,6 +11,23 @@
 """
 
 import os, sys, io, json, sqlite3, logging, argparse, time, csv
+
+# Monkey-patch torchaudio to silently ignore C++ extension load failures.
+# CosyVoice only uses torchaudio.compliance.kaldi which is pure Python/torch
+# and does NOT require the C++ extension (_torchaudio.so).
+# This is needed when torchaudio ABI doesn't match the installed PyTorch
+# (e.g. NVIDIA custom builds like 2.8.0a0+nv25.06).
+try:
+    import torchaudio._extension.utils as _ta_ext_utils
+    _orig_load_lib = _ta_ext_utils._load_lib
+    def _safe_load_lib(lib):
+        try:
+            return _orig_load_lib(lib)
+        except Exception:
+            return False
+    _ta_ext_utils._load_lib = _safe_load_lib
+except Exception:
+    pass
 import numpy as np
 import soundfile as sf
 import pandas as pd
