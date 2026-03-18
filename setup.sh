@@ -3,6 +3,10 @@ set -e
 
 echo "=== CosyVoice Hokkien TTS Setup ==="
 
+# ── 0. 系統依賴 ────────────────────────────────────────────────────────────────
+echo "[0/4] Installing system dependencies (ffmpeg)..."
+apt-get install -y ffmpeg
+
 # ── 1. CosyVoice repo ──────────────────────────────────────────────────────────
 echo "[1/4] Cloning CosyVoice..."
 mkdir -p apps/synthesis/repositories
