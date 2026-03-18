@@ -13,10 +13,10 @@ cd ../../../..
 
 # ── 2. 安裝 Python 依賴 ────────────────────────────────────────────────────────
 echo "[2/4] Installing CosyVoice requirements..."
-pip install -r apps/synthesis/repositories/CosyVoice/requirements.txt
+python -m pip install -r apps/synthesis/repositories/CosyVoice/requirements.txt
 
 echo "Installing synthesis script requirements..."
-pip install soundfile datasets huggingface_hub pandas pyarrow
+python -m pip install soundfile datasets huggingface_hub pandas pyarrow
 
 # ── 3. 下載模型權重 ────────────────────────────────────────────────────────────
 echo "[3/4] Downloading Fun-CosyVoice3-0.5B model weights..."
@@ -26,7 +26,7 @@ git clone https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B \
 
 # ── 4. 安裝 vLLM ───────────────────────────────────────────────────────────────
 echo "[4/4] Installing vLLM..."
-pip install vllm==0.9.0 transformers==4.51.3 numpy==1.26.4
+python -m pip install vllm==0.9.0 transformers==4.51.3 numpy==1.26.4
 
 echo ""
 echo "=== Setup complete! ==="
