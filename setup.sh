@@ -13,9 +13,8 @@ cd ../../../..
 
 # ── 2. 安裝 Python 依賴 ────────────────────────────────────────────────────────
 echo "[2/4] Installing CosyVoice requirements..."
-python -m pip install --upgrade setuptools wheel
-# openai-whisper uses setup.py; install with --no-build-isolation to avoid
-# isolated build env picking up system Python's missing pkg_resources
+# setuptools<71 still bundles pkg_resources; needed by openai-whisper==20231117
+python -m pip install "setuptools<71" wheel
 python -m pip install --no-build-isolation openai-whisper==20231117
 python -m pip install -r apps/synthesis/repositories/CosyVoice/requirements.txt
 
