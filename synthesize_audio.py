@@ -285,36 +285,53 @@ def dir_size_gb(path: str) -> float:
 
 
 # ── HuggingFace Upload ─────────────────────────────────────────────────────────
-def upload_batch(samples: list, gpu_idx: int, batch_num: int,
+def upload_batch(samples: list, worker_id: int, batch_num: int,
                  audio_dir: str, db_path: str, hf_api: HfApi):
     """samples: list of dicts with audio bytes + metadata"""
     if not samples:
         return
 
-    # Build parquet-compatible records
-    records = []
-    for s in samples:
-        records.append({
-            "audio":        {"bytes": s["audio_bytes"], "path": None},
-            "text":         s["text"],
-            "duration":     s["duration"],
-            "sample_rate":  s["sample_rate"],
-            "speaker_id":   s["speaker_id"],
-            "seed_audio_id": s["seed_audio_id"],
-            "domain":       s["domain"],
-            "subdomain":    s["subdomain"],
-            "scene":        s["scene"],
-            "speaker":      s["speaker"],
-            "emotion":      s["emotion"],
-            "accent":       s["accent"],
-            "seed_text_id": s["seed_text_id"],
-        })
+    from datasets import Dataset, Features
+    from datasets import Audio as HFAudio, Value
 
-    df       = pd.DataFrame(records)
-    hf_path  = f"data/gpu{gpu_idx}/batch_{batch_num:06d}.parquet"
-    tmp_path = os.path.join(audio_dir, f"tmp_gpu{gpu_idx}_b{batch_num}.parquet")
+    sr = samples[0]["sample_rate"]
+    features = Features({
+        "audio":        HFAudio(sampling_rate=sr),
+        "text":         Value("string"),
+        "duration":     Value("float32"),
+        "sample_rate":  Value("int32"),
+        "speaker_id":   Value("string"),
+        "seed_audio_id": Value("string"),
+        "domain":       Value("string"),
+        "subdomain":    Value("string"),
+        "scene":        Value("string"),
+        "speaker":      Value("string"),
+        "emotion":      Value("string"),
+        "accent":       Value("string"),
+        "seed_text_id": Value("int32"),
+    })
 
-    df.to_parquet(tmp_path, index=False)
+    data = {
+        "audio":        [{"bytes": s["audio_bytes"], "path": None} for s in samples],
+        "text":         [s["text"]         for s in samples],
+        "duration":     [s["duration"]     for s in samples],
+        "sample_rate":  [s["sample_rate"]  for s in samples],
+        "speaker_id":   [s["speaker_id"]   for s in samples],
+        "seed_audio_id": [s["seed_audio_id"] for s in samples],
+        "domain":       [s["domain"]       for s in samples],
+        "subdomain":    [s["subdomain"]    for s in samples],
+        "scene":        [s["scene"]        for s in samples],
+        "speaker":      [s["speaker"]      for s in samples],
+        "emotion":      [s["emotion"]      for s in samples],
+        "accent":       [s["accent"]       for s in samples],
+        "seed_text_id": [s["seed_text_id"] for s in samples],
+    }
+
+    ds       = Dataset.from_dict(data, features=features)
+    hf_path  = f"data/worker{worker_id}/batch_{batch_num:06d}.parquet"
+    tmp_path = os.path.join(audio_dir, f"tmp_w{worker_id}_b{batch_num}.parquet")
+
+    ds.to_parquet(tmp_path)
     hf_api.upload_file(
         path_or_fileobj=tmp_path,
         path_in_repo=hf_path,
@@ -322,9 +339,9 @@ def upload_batch(samples: list, gpu_idx: int, batch_num: int,
         repo_type="dataset",
     )
     os.remove(tmp_path)
-    record_batch(db_path, gpu_idx, batch_num, hf_path)
-    logger.info("GPU%d uploaded batch %06d (%d samples) → %s",
-                gpu_idx, batch_num, len(samples), hf_path)
+    record_batch(db_path, worker_id, batch_num, hf_path)
+    logger.info("Worker%d uploaded batch %06d (%d samples) → %s",
+                worker_id, batch_num, len(samples), hf_path)
 
 
 # ── Worker ─────────────────────────────────────────────────────────────────────
