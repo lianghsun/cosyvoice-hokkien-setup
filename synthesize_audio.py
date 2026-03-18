@@ -291,47 +291,71 @@ def upload_batch(samples: list, worker_id: int, batch_num: int,
     if not samples:
         return
 
-    from datasets import Dataset, Features
-    from datasets import Audio as HFAudio, Value
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+    import json
 
     sr = samples[0]["sample_rate"]
-    features = Features({
-        "audio":        HFAudio(sampling_rate=sr),
-        "text":         Value("string"),
-        "duration":     Value("float32"),
-        "sample_rate":  Value("int32"),
-        "speaker_id":   Value("string"),
-        "seed_audio_id": Value("string"),
-        "domain":       Value("string"),
-        "subdomain":    Value("string"),
-        "scene":        Value("string"),
-        "speaker":      Value("string"),
-        "emotion":      Value("string"),
-        "accent":       Value("string"),
-        "seed_text_id": Value("int32"),
+
+    # 用 pyarrow 直接寫 parquet，手動加 HF Audio feature metadata
+    # 繞過 datasets.Audio.encode_example 會呼叫 torchcodec 的問題
+    hf_meta = json.dumps({
+        "info": {
+            "features": {
+                "audio":        {"_type": "Audio", "sampling_rate": sr},
+                "text":         {"_type": "Value", "dtype": "string"},
+                "duration":     {"_type": "Value", "dtype": "float32"},
+                "sample_rate":  {"_type": "Value", "dtype": "int32"},
+                "speaker_id":   {"_type": "Value", "dtype": "string"},
+                "seed_audio_id": {"_type": "Value", "dtype": "string"},
+                "domain":       {"_type": "Value", "dtype": "string"},
+                "subdomain":    {"_type": "Value", "dtype": "string"},
+                "scene":        {"_type": "Value", "dtype": "string"},
+                "speaker":      {"_type": "Value", "dtype": "string"},
+                "emotion":      {"_type": "Value", "dtype": "string"},
+                "accent":       {"_type": "Value", "dtype": "string"},
+                "seed_text_id": {"_type": "Value", "dtype": "int32"},
+            }
+        }
     })
 
-    data = {
-        "audio":        [{"bytes": s["audio_bytes"], "path": None} for s in samples],
-        "text":         [s["text"]         for s in samples],
-        "duration":     [s["duration"]     for s in samples],
-        "sample_rate":  [s["sample_rate"]  for s in samples],
-        "speaker_id":   [s["speaker_id"]   for s in samples],
-        "seed_audio_id": [s["seed_audio_id"] for s in samples],
-        "domain":       [s["domain"]       for s in samples],
-        "subdomain":    [s["subdomain"]    for s in samples],
-        "scene":        [s["scene"]        for s in samples],
-        "speaker":      [s["speaker"]      for s in samples],
-        "emotion":      [s["emotion"]      for s in samples],
-        "accent":       [s["accent"]       for s in samples],
-        "seed_text_id": [s["seed_text_id"] for s in samples],
-    }
+    audio_type = pa.struct([("bytes", pa.binary()), ("path", pa.string())])
+    schema = pa.schema([
+        pa.field("audio",        audio_type),
+        pa.field("text",         pa.string()),
+        pa.field("duration",     pa.float32()),
+        pa.field("sample_rate",  pa.int32()),
+        pa.field("speaker_id",   pa.string()),
+        pa.field("seed_audio_id", pa.string()),
+        pa.field("domain",       pa.string()),
+        pa.field("subdomain",    pa.string()),
+        pa.field("scene",        pa.string()),
+        pa.field("speaker",      pa.string()),
+        pa.field("emotion",      pa.string()),
+        pa.field("accent",       pa.string()),
+        pa.field("seed_text_id", pa.int32()),
+    ], metadata={"huggingface": hf_meta})
 
-    ds       = Dataset.from_dict(data, features=features)
+    table = pa.table({
+        "audio":        [{"bytes": s["audio_bytes"], "path": None} for s in samples],
+        "text":         [s["text"]          for s in samples],
+        "duration":     [s["duration"]      for s in samples],
+        "sample_rate":  [s["sample_rate"]   for s in samples],
+        "speaker_id":   [s["speaker_id"]    for s in samples],
+        "seed_audio_id": [s["seed_audio_id"] for s in samples],
+        "domain":       [s["domain"]        for s in samples],
+        "subdomain":    [s["subdomain"]     for s in samples],
+        "scene":        [s["scene"]         for s in samples],
+        "speaker":      [s["speaker"]       for s in samples],
+        "emotion":      [s["emotion"]       for s in samples],
+        "accent":       [s["accent"]        for s in samples],
+        "seed_text_id": [s["seed_text_id"]  for s in samples],
+    }, schema=schema)
+
     hf_path  = f"data/worker{worker_id}/batch_{batch_num:06d}.parquet"
     tmp_path = os.path.join(audio_dir, f"tmp_w{worker_id}_b{batch_num}.parquet")
 
-    ds.to_parquet(tmp_path)
+    pq.write_table(table, tmp_path)
     hf_api.upload_file(
         path_or_fileobj=tmp_path,
         path_in_repo=hf_path,
