@@ -20,8 +20,8 @@ pydantic==2.7.0
 rich==13.7.1
 soundfile==0.12.1
 tensorboard==2.14.0
-torch==2.7.0
-torchaudio==2.7.0
+torch==2.7.0+cu129
+torchaudio==2.7.0+cu129
 WeTextProcessing==1.0.3
 pyarrow
 datasets
