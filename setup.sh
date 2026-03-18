@@ -15,11 +15,11 @@ cd ../../../..
 echo "[2/4] Installing CosyVoice requirements..."
 # setuptools<71 still bundles pkg_resources; needed by openai-whisper==20231117
 python -m pip install "setuptools<71" wheel
-python -m pip install --no-build-isolation openai-whisper==20231117
-python -m pip install -r apps/synthesis/repositories/CosyVoice/requirements.txt
+python -m pip install --no-build-isolation --no-deps openai-whisper==20231117
+python -m pip install --timeout 300 -r apps/synthesis/repositories/CosyVoice/requirements.txt
 
 echo "Installing synthesis script requirements..."
-python -m pip install soundfile datasets huggingface_hub pandas pyarrow
+python -m pip install --timeout 300 soundfile datasets huggingface_hub pandas pyarrow
 
 # ── 3. 下載模型權重 ────────────────────────────────────────────────────────────
 echo "[3/4] Downloading Fun-CosyVoice3-0.5B model weights..."
@@ -29,7 +29,7 @@ git clone https://huggingface.co/FunAudioLLM/Fun-CosyVoice3-0.5B \
 
 # ── 4. 安裝 vLLM ───────────────────────────────────────────────────────────────
 echo "[4/4] Installing vLLM..."
-python -m pip install vllm==0.9.0 transformers==4.51.3 numpy==1.26.4
+python -m pip install --timeout 300 vllm==0.9.0 transformers==4.51.3 numpy==1.26.4
 
 echo ""
 echo "=== Setup complete! ==="
