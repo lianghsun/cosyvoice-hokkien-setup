@@ -1,4 +1,4 @@
---index-url https://download.pytorch.org/whl/cu129
+--index-url https://download.pytorch.org/whl/cu128
 --extra-index-url https://pypi.org/simple
 conformer==0.3.2
 deepspeed==0.14.2; sys_platform == 'linux'
@@ -20,8 +20,8 @@ pydantic==2.7.0
 rich==13.7.1
 soundfile==0.12.1
 tensorboard==2.14.0
-torch==2.7.0+cu129
-torchaudio==2.7.0+cu129
+torch==2.7.0+cu128
+torchaudio==2.7.0+cu128
 WeTextProcessing==1.0.3
 pyarrow
 datasets
