@@ -31,6 +31,8 @@ python -m pip install --timeout 300 "grpcio>=1.59.0" "grpcio-tools>=1.59.0"
 
 echo "Installing synthesis script requirements..."
 python -m pip install --timeout 300 soundfile datasets huggingface_hub pandas pyarrow
+# torchcodec (pulled in by datasets) is incompatible with PyTorch 2.7; use soundfile instead
+python -m pip uninstall -y torchcodec 2>/dev/null || true
 
 # ── 3. 下載模型權重 ────────────────────────────────────────────────────────────
 echo "[3/4] Downloading Fun-CosyVoice3-0.5B model weights..."
