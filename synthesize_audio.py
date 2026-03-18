@@ -8,6 +8,7 @@
 常用選項：
     python synthesize_audio.py --n-gpus 4
     python synthesize_audio.py --upload-every 2000 --max-disk-gb 30
+    python synthesize_audio.py --workers-per-gpu 8   # 每張 GPU 塞 8 個 model instance（B200 183GB VRAM）
 """
 
 import os, sys, io, json, sqlite3, logging, argparse, time, csv
@@ -77,6 +78,9 @@ def parse_args():
                    help="額外種子音頻 HF dataset repo（設為空字串可停用）")
     p.add_argument("--hf-seed-cache", default=os.path.join(SCRIPT_DIR, "hf_seed_cache"),
                    help="HF 種子音頻本地快取目錄")
+    p.add_argument("--workers-per-gpu", type=int, default=1,
+                   help="每張 GPU 上同時跑幾個 CosyVoice3 instance（預設 1）。"
+                        "B200 183GB VRAM / ~10GB per model ≈ 最多 15。")
     return p.parse_args()
 
 
@@ -324,14 +328,21 @@ def upload_batch(samples: list, gpu_idx: int, batch_num: int,
 
 
 # ── Worker ─────────────────────────────────────────────────────────────────────
-def worker_fn(gpu_idx: int, n_gpus: int, args_dict: dict):
-    """每張 GPU 跑一個 CosyVoice3 instance"""
+def worker_fn(worker_id: int, total_workers: int, args_dict: dict):
+    """
+    每個 worker 跑一個 CosyVoice3 instance。
+    physical GPU = worker_id // workers_per_gpu
+    partition    = global_idx % total_workers == worker_id
+    """
+    workers_per_gpu = args_dict.get("workers_per_gpu", 1)
+    phys_gpu = worker_id // workers_per_gpu
 
     # ① 隔離 GPU（必須在 import torch/vllm 之前設定）
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_idx)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(phys_gpu)
 
-    log = logging.getLogger(f"GPU{gpu_idx}")
-    log.info("Starting on physical GPU %d", gpu_idx)
+    log = logging.getLogger(f"W{worker_id}(GPU{phys_gpu})")
+    log.info("Starting worker %d on physical GPU %d (%d workers/gpu)",
+             worker_id, phys_gpu, workers_per_gpu)
 
     # ② 設定 CosyVoice 路徑
     cosyvoice_dir = args_dict["cosyvoice_dir"]
@@ -361,10 +372,10 @@ def worker_fn(gpu_idx: int, n_gpus: int, args_dict: dict):
     seeds    = args_dict["seed_speakers"]
     n_seeds  = len(seeds)
 
-    # ⑤ 斷點
+    # ⑤ 斷點（DB 用 worker_id 當 gpu_idx 欄位）
     db_path  = args_dict["db_path"]
     init_db(db_path)
-    done_ids = get_done_ids(db_path, gpu_idx)
+    done_ids = get_done_ids(db_path, worker_id)
     log.info("Already done: %d", len(done_ids))
 
     # ⑥ 讀取文本資料集（本地 or HF streaming）
@@ -384,11 +395,11 @@ def worker_fn(gpu_idx: int, n_gpus: int, args_dict: dict):
     os.makedirs(audio_dir, exist_ok=True)
 
     local_samples = []
-    batch_num = next_batch_num(db_path, gpu_idx)
+    batch_num = next_batch_num(db_path, worker_id)
 
     for global_idx, item in enumerate(dataset):
-        # 本 GPU 只處理 global_idx % n_gpus == gpu_idx 的項目
-        if global_idx % n_gpus != gpu_idx:
+        # 每個 worker 只處理 global_idx % total_workers == worker_id 的項目
+        if global_idx % total_workers != worker_id:
             continue
 
         text_id = int(item.get("id", global_idx))
@@ -426,11 +437,11 @@ def worker_fn(gpu_idx: int, n_gpus: int, args_dict: dict):
                 "seed_text_id":  text_id,
             })
             done_ids.add(text_id)
-            mark_done(db_path, text_id, gpu_idx, f"batch_{batch_num:06d}")
+            mark_done(db_path, text_id, worker_id, f"batch_{batch_num:06d}")
 
         except Exception as e:
             log.error("text_id=%d: %s", text_id, e)
-            mark_error(db_path, text_id, gpu_idx, str(e))
+            mark_error(db_path, text_id, worker_id, str(e))
             continue
 
         # ⑧ 達到上傳門檻時上傳
@@ -439,27 +450,30 @@ def worker_fn(gpu_idx: int, n_gpus: int, args_dict: dict):
             dir_size_gb(audio_dir) >= args_dict["max_disk_gb"]
         )
         if should_upload:
-            upload_batch(local_samples, gpu_idx, batch_num, audio_dir, db_path, hf_api)
+            upload_batch(local_samples, worker_id, batch_num, audio_dir, db_path, hf_api)
             local_samples = []
             batch_num += 1
 
     # ⑨ 收尾上傳
     if local_samples:
-        upload_batch(local_samples, gpu_idx, batch_num, audio_dir, db_path, hf_api)
+        upload_batch(local_samples, worker_id, batch_num, audio_dir, db_path, hf_api)
 
-    log.info("GPU %d finished.", gpu_idx)
+    log.info("Worker %d (GPU %d) finished.", worker_id, phys_gpu)
 
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main():
-    args     = parse_args()
-    n_gpus   = args.n_gpus or torch.cuda.device_count()
+    args            = parse_args()
+    n_gpus          = args.n_gpus or torch.cuda.device_count()
+    workers_per_gpu = args.workers_per_gpu
+    total_workers   = n_gpus * workers_per_gpu
 
     if n_gpus == 0:
         logger.error("No CUDA GPUs found. Exiting.")
         sys.exit(1)
 
-    logger.info("Starting synthesis on %d GPU(s)", n_gpus)
+    logger.info("Starting synthesis on %d GPU(s) × %d worker(s)/GPU = %d total workers",
+                n_gpus, workers_per_gpu, total_workers)
 
     # 確保 HF audio repo 存在
     hf_api = HfApi(token=HF_TOKEN)
@@ -489,28 +503,32 @@ def main():
 
     # 打包 worker 參數（需可 pickle）
     args_dict = {
-        "model_path":    args.model_path,
-        "cosyvoice_dir": args.cosyvoice_dir,
-        "tat_dir":       args.tat_dir,
-        "hanzi_json":    args.hanzi_json,
-        "audio_dir":     args.audio_dir,
-        "db_path":       args.db_path,
-        "upload_every":  args.upload_every,
-        "max_disk_gb":   args.max_disk_gb,
-        "use_vllm":      args.use_vllm,
-        "hf_token":      HF_TOKEN,
-        "seed_speakers": seed_speakers,
-        "src_dir":       args.src_dir,
+        "model_path":      args.model_path,
+        "cosyvoice_dir":   args.cosyvoice_dir,
+        "tat_dir":         args.tat_dir,
+        "hanzi_json":      args.hanzi_json,
+        "audio_dir":       args.audio_dir,
+        "db_path":         args.db_path,
+        "upload_every":    args.upload_every,
+        "max_disk_gb":     args.max_disk_gb,
+        "use_vllm":        args.use_vllm,
+        "hf_token":        HF_TOKEN,
+        "seed_speakers":   seed_speakers,
+        "src_dir":         args.src_dir,
+        "workers_per_gpu": workers_per_gpu,
     }
 
-    # 啟動 N 個 GPU 進程（spawn 避免 CUDA fork 問題）
+    # 啟動 total_workers 個進程（spawn 避免 CUDA fork 問題）
+    # worker_id → physical GPU = worker_id // workers_per_gpu
+    # 例：2 GPU × 8 workers = 16 workers，worker 0-7 → GPU0，worker 8-15 → GPU1
     mp.set_start_method("spawn", force=True)
     processes = []
-    for gpu_idx in range(n_gpus):
-        p = mp.Process(target=worker_fn, args=(gpu_idx, n_gpus, args_dict))
+    for worker_id in range(total_workers):
+        phys_gpu = worker_id // workers_per_gpu
+        p = mp.Process(target=worker_fn, args=(worker_id, total_workers, args_dict))
         p.start()
         processes.append(p)
-        logger.info("Started worker for GPU %d (PID %d)", gpu_idx, p.pid)
+        logger.info("Started worker %d on GPU %d (PID %d)", worker_id, phys_gpu, p.pid)
 
     for p in processes:
         p.join()
