@@ -57,6 +57,10 @@ def parse_args():
                         "不設則從 HF 串流讀取")
     p.add_argument("--use-vllm",      action="store_true", default=True)
     p.add_argument("--no-vllm",       dest="use_vllm", action="store_false")
+    p.add_argument("--hf-seed-repo",  default="OKHand/Clean_Common_Voice_Speech_24.0-TW",
+                   help="額外種子音頻 HF dataset repo（設為空字串可停用）")
+    p.add_argument("--hf-seed-cache", default=os.path.join(SCRIPT_DIR, "hf_seed_cache"),
+                   help="HF 種子音頻本地快取目錄")
     return p.parse_args()
 
 
@@ -95,6 +99,80 @@ def load_seed_speakers(tat_dir: str, hanzi_json: str) -> list:
                 })
 
     logger.info("Loaded %d seed speakers from TAT", len(seeds))
+    return seeds
+
+
+def load_hf_seed_speakers(repo_id: str, cache_dir: str, hf_token: str) -> list:
+    """
+    從 HuggingFace dataset 載入種子說話者，將音頻快取為本地 WAV。
+    支援 Common Voice 格式：audio（array+sampling_rate 或 bytes）、sentence、client_id。
+    回傳: [{"speaker_id", "utt_id", "wav_path", "hanzi"}, ...]
+    """
+    from datasets import load_dataset
+
+    os.makedirs(cache_dir, exist_ok=True)
+    done_marker = os.path.join(cache_dir, ".done")
+
+    # 若已快取完畢，直接讀目錄
+    seeds = []
+    if os.path.exists(done_marker):
+        for wav_file in sorted(Path(cache_dir).glob("*.wav")):
+            meta_file = wav_file.with_suffix(".txt")
+            speaker_id = wav_file.stem.split("_")[0]
+            hanzi = meta_file.read_text(encoding="utf-8").strip() if meta_file.exists() else ""
+            seeds.append({
+                "speaker_id": speaker_id,
+                "utt_id":     wav_file.stem,
+                "wav_path":   str(wav_file),
+                "hanzi":      hanzi,
+            })
+        logger.info("Loaded %d HF seed speakers from cache (%s)", len(seeds), cache_dir)
+        return seeds
+
+    logger.info("Downloading HF seed speakers from %s …", repo_id)
+    ds = load_dataset(repo_id, split="train", token=hf_token or None)
+
+    for idx, item in enumerate(ds):
+        audio_info  = item.get("audio", {})
+        sentence    = item.get("sentence", "")
+        client_id   = item.get("client_id", f"spk{idx:06d}")
+        # sanitize client_id for filename
+        safe_id     = client_id[:16].replace("/", "_").replace(" ", "_")
+        utt_id      = f"{safe_id}_{idx:06d}"
+        wav_path    = os.path.join(cache_dir, f"{utt_id}.wav")
+
+        if not os.path.exists(wav_path):
+            if isinstance(audio_info, dict) and "array" in audio_info:
+                arr = np.array(audio_info["array"], dtype=np.float32)
+                sr  = int(audio_info.get("sampling_rate", 16000))
+                sf.write(wav_path, arr, sr)
+            elif isinstance(audio_info, dict) and "bytes" in audio_info and audio_info["bytes"]:
+                with open(wav_path, "wb") as f:
+                    f.write(audio_info["bytes"])
+            else:
+                continue  # 無法取得音頻，跳過
+
+        # 儲存文字
+        txt_path = os.path.join(cache_dir, f"{utt_id}.txt")
+        if not os.path.exists(txt_path):
+            with open(txt_path, "w", encoding="utf-8") as f:
+                f.write(sentence)
+
+        seeds.append({
+            "speaker_id": safe_id,
+            "utt_id":     utt_id,
+            "wav_path":   wav_path,
+            "hanzi":      sentence,
+        })
+
+        if (idx + 1) % 1000 == 0:
+            logger.info("  cached %d / %d HF seeds", idx + 1, len(ds))
+
+    # 標記快取完成
+    with open(done_marker, "w") as f:
+        f.write(str(len(seeds)))
+
+    logger.info("Loaded %d HF seed speakers from %s", len(seeds), repo_id)
     return seeds
 
 
@@ -381,6 +459,13 @@ def main():
 
     # 載入種子說話者（主進程載入，傳給所有 workers）
     seed_speakers = load_seed_speakers(args.tat_dir, args.hanzi_json)
+
+    # 合併 HF 額外種子
+    if args.hf_seed_repo:
+        hf_seeds = load_hf_seed_speakers(args.hf_seed_repo, args.hf_seed_cache, HF_TOKEN)
+        seed_speakers = seed_speakers + hf_seeds
+        logger.info("Total seed speakers (TAT + HF): %d", len(seed_speakers))
+
     if not seed_speakers:
         logger.error("No seed speakers found. Check --tat-dir and --hanzi-json.")
         sys.exit(1)
