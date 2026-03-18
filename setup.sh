@@ -16,10 +16,14 @@ echo "[2/4] Installing CosyVoice requirements..."
 # setuptools<71 still bundles pkg_resources; needed by openai-whisper==20231117
 python -m pip install "setuptools<71" wheel
 python -m pip install --no-build-isolation --no-deps openai-whisper==20231117
-# openai-whisper already installed above; filter it out to avoid re-pulling triton
-grep -v "^openai-whisper" apps/synthesis/repositories/CosyVoice/requirements.txt \
+# Filter packages incompatible with Python 3.12:
+#   openai-whisper: already installed above (--no-deps avoids triton download)
+#   grpcio / grpcio-tools 1.57.x: uses removed PyLongObject.ob_digit; need >=1.59
+grep -vE "^(openai-whisper|grpcio==|grpcio-tools==)" \
+    apps/synthesis/repositories/CosyVoice/requirements.txt \
     > /tmp/cosyvoice_req_filtered.txt
 python -m pip install --timeout 300 -r /tmp/cosyvoice_req_filtered.txt
+python -m pip install --timeout 300 "grpcio>=1.59.0" "grpcio-tools>=1.59.0"
 
 echo "Installing synthesis script requirements..."
 python -m pip install --timeout 300 soundfile datasets huggingface_hub pandas pyarrow
