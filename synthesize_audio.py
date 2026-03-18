@@ -19,8 +19,7 @@ import torch.multiprocessing as mp
 from pathlib import Path
 from huggingface_hub import HfApi
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s GPU%(gpu)s %(levelname)s %(message)s",
-                    defaults={"gpu": "M"})
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(name)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
 
 # ── Constants ──────────────────────────────────────────────────────────────────
