@@ -44,7 +44,7 @@ logger = logging.getLogger(__name__)
 HF_TOKEN      = os.getenv("HF_TOKEN", "")
 HF_SRC_REPO   = "lianghsun/tw-hokkien-seed-text"
 HF_AUDIO_REPO = "lianghsun/tw-hokkien-audio"
-INSTRUCTION   = "You are a helpful assistant. 请用闽南话表達。<|endofprompt|>"
+INSTRUCTION   = "You are a helpful assistant. 请用闽南话表达。<|endofprompt|>"
 
 SCRIPT_DIR    = os.path.dirname(os.path.abspath(__file__))
 
@@ -452,12 +452,11 @@ def worker_fn(worker_id: int, total_workers: int, args_dict: dict):
             continue
 
         # 選種子說話者（按 text_id 循環）
-        seed        = seeds[text_id % n_seeds]
-        prompt_text = INSTRUCTION + seed["hanzi"]
+        seed = seeds[text_id % n_seeds]
 
         try:
-            output = next(cosyvoice.inference_zero_shot(
-                target_text, prompt_text, seed["wav_path"], stream=False
+            output = next(cosyvoice.inference_instruct2(
+                target_text, INSTRUCTION, seed["wav_path"], stream=False
             ))
             audio_np = output["tts_speech"].squeeze().cpu().numpy()
             duration = round(len(audio_np) / sample_rate, 3)
