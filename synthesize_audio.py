@@ -520,14 +520,69 @@ def main():
     logger.info("Starting synthesis on %d GPU(s) × %d worker(s)/GPU = %d total workers",
                 n_gpus, workers_per_gpu, total_workers)
 
-    # 確保 HF audio repo 存在
+    # 確保 HF audio repo 存在，並上傳 dataset card
     hf_api = HfApi(token=HF_TOKEN)
+    repo_exists = False
     try:
         hf_api.repo_info(repo_id=HF_AUDIO_REPO, repo_type="dataset")
+        repo_exists = True
         logger.info("HF audio repo already exists: %s", HF_AUDIO_REPO)
     except Exception:
         hf_api.create_repo(repo_id=HF_AUDIO_REPO, repo_type="dataset", private=False)
         logger.info("Created HF audio repo: %s", HF_AUDIO_REPO)
+
+    if not repo_exists:
+        dataset_card = """\
+---
+language:
+- nan
+- zh
+license: cc-by-4.0
+task_categories:
+- text-to-speech
+tags:
+- hokkien
+- taiwanese
+- tts
+- audio
+pretty_name: Taiwanese Hokkien TTS Audio
+---
+
+# Taiwanese Hokkien TTS Audio
+
+台語（閩南語）合成語音資料集，由 [CosyVoice3](https://github.com/FunAudioLLM/CosyVoice)（Fun-CosyVoice3-0.5B）批次生成。
+
+## 資料來源
+
+- **文本**：[lianghsun/tw-hokkien-seed-text](https://huggingface.co/datasets/lianghsun/tw-hokkien-seed-text)
+- **聲色種子（TAT）**：[lianghsun/tat_open_source](https://huggingface.co/datasets/lianghsun/tat_open_source) dev/hok（722 筆）
+- **聲色種子（Common Voice）**：[OKHand/Clean_Common_Voice_Speech_24.0-TW](https://huggingface.co/datasets/OKHand/Clean_Common_Voice_Speech_24.0-TW)（32,506 筆）
+
+## 欄位說明
+
+| 欄位 | 說明 |
+|------|------|
+| `audio` | 合成音頻（WAV，22050 Hz） |
+| `text` | 台語文本（漢羅混用） |
+| `duration` | 音頻長度（秒） |
+| `sample_rate` | 取樣率（Hz） |
+| `speaker_id` | 聲色種子說話者 ID |
+| `seed_audio_id` | 種子音頻 ID |
+| `domain` / `subdomain` / `scene` | 文本領域分類 |
+| `speaker` / `emotion` / `accent` | 說話風格標注 |
+| `seed_text_id` | 對應文本 ID |
+
+## 生成方式
+
+使用 `inference_instruct2` 搭配指令 `请用闽南话表达` 進行零樣本聲色克隆合成。
+"""
+        hf_api.upload_file(
+            path_or_fileobj=dataset_card.encode("utf-8"),
+            path_in_repo="README.md",
+            repo_id=HF_AUDIO_REPO,
+            repo_type="dataset",
+        )
+        logger.info("Uploaded dataset card to %s", HF_AUDIO_REPO)
 
     # 建立本地暫存目錄與 DB
     os.makedirs(args.audio_dir, exist_ok=True)
