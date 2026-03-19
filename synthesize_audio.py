@@ -78,6 +78,8 @@ def parse_args():
                    help="額外種子音頻 HF dataset repo（設為空字串可停用）")
     p.add_argument("--hf-seed-cache", default=os.path.join(SCRIPT_DIR, "hf_seed_cache"),
                    help="HF 種子音頻本地快取目錄")
+    p.add_argument("--max-samples",     type=int, default=0,
+                   help="每個 worker 最多生幾筆就停（0 = 不限）")
     p.add_argument("--workers-per-gpu", type=int, default=1,
                    help="每張 GPU 上同時跑幾個 CosyVoice3 instance（預設 1）。"
                         "B200 183GB VRAM / ~10GB per model ≈ 最多 15。")
@@ -454,6 +456,9 @@ def worker_fn(worker_id: int, total_workers: int, args_dict: dict):
         # 選種子說話者（按 text_id 循環）
         seed = seeds[text_id % n_seeds]
 
+        if args_dict["max_samples"] and len(done_ids) >= args_dict["max_samples"]:
+            break
+
         try:
             output = next(cosyvoice.inference_instruct2(
                 target_text, INSTRUCTION, seed["wav_path"], stream=False
@@ -556,6 +561,7 @@ def main():
         "seed_speakers":   seed_speakers,
         "src_dir":         args.src_dir,
         "workers_per_gpu": workers_per_gpu,
+        "max_samples":     args.max_samples,
     }
 
     # 啟動 total_workers 個進程（spawn 避免 CUDA fork 問題）
