@@ -529,7 +529,8 @@ def main():
         logger.info("HF audio repo already exists: %s", HF_AUDIO_REPO)
     except Exception:
         hf_api.create_repo(repo_id=HF_AUDIO_REPO, repo_type="dataset", private=False)
-        logger.info("Created HF audio repo: %s", HF_AUDIO_REPO)
+        hf_api.update_repo_settings(repo_id=HF_AUDIO_REPO, repo_type="dataset", gated="manual")
+        logger.info("Created HF audio repo (public, gated/manual): %s", HF_AUDIO_REPO)
 
     if not repo_exists:
         dataset_card = """\
